@@ -28,6 +28,10 @@ SERVICE_NAME = 'notifier'
 FORUM_DIGEST_EMAIL_SENDER = os.getenv('FORUM_DIGEST_EMAIL_SENDER', 'notifications@example.org')
 FORUM_DIGEST_EMAIL_SUBJECT = os.getenv('FORUM_DIGEST_EMAIL_SUBJECT', 'Daily Discussion Digest')
 FORUM_DIGEST_EMAIL_TITLE = os.getenv('FORUM_DIGEST_EMAIL_TITLE', 'Discussion Digest')
+FORUM_DIGEST_EMAIL_TITLE_FLAGGED = os.getenv(
+    'FORUM_DIGEST_EMAIL_TITLE_FLAGGED',
+    'Flagged Posts Digest'
+)
 FORUM_DIGEST_EMAIL_DESCRIPTION = os.getenv(
     'FORUM_DIGEST_EMAIL_DESCRIPTION',
     'A digest of unread content from course discussions you are following.'
@@ -95,6 +99,7 @@ FORUM_DIGEST_TASK_MAX_RETRIES = 2
 FORUM_DIGEST_TASK_RETRY_DELAY = 300
 # set the interval (in minutes) at which the top-level digest task is triggered
 FORUM_DIGEST_TASK_INTERVAL = int(os.getenv('FORUM_DIGEST_TASK_INTERVAL', 1440))
+FORUM_DIGEST_TASK_INTERVAL_FLAGGED = int(os.getenv('FORUM_DIGEST_TASK_INTERVAL_FLAGGED', 0))
 
 
 LOGGING = {
@@ -169,6 +174,16 @@ if FORUM_DIGEST_TASK_INTERVAL==1440:
 else:
     DIGEST_CRON_SCHEDULE = {'minute': '*/{}'.format(FORUM_DIGEST_TASK_INTERVAL) }
 
+# set up schedule for flagged forum digest job
+if FORUM_DIGEST_TASK_INTERVAL_FLAGGED == 1440:
+    # in the production case, make the 24 hour cycle happen at a
+    # predetermined time of day (midnight UTC)
+    DIGEST_CRON_SCHEDULE_FLAGGED = {'hour': 0}
+else:
+    DIGEST_CRON_SCHEDULE_FLAGGED = {
+        'minute': '*/{}'.format(FORUM_DIGEST_TASK_INTERVAL_FLAGGED),
+    }
+
 DAILY_TASK_MAX_RETRIES = 2
 DAILY_TASK_RETRY_DELAY = 60
 
@@ -202,3 +217,11 @@ LOCALE_PATHS = (os.path.join(os.path.dirname(os.path.dirname(__file__)), 'locale
 
 # Parameterize digest logo image url
 LOGO_IMAGE_URL = os.getenv('LOGO_IMAGE_URL', "{}/static/images/edx-theme/edx-header-logo.png".format(LMS_URL_BASE))
+
+HEROKU_USERNAME = os.getenv('HEROKU_USERNAME', '')
+HEROKU_PASSWORD = os.getenv('HEROKU_PASSWORD', '')
+HEROKU_COMMAND_FLAGGED = os.getenv(
+    'HEROKU_COMMAND_FLAGGED',
+    "cat notifier/tests/fixtures/flagged.list",
+)
+

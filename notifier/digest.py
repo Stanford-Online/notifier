@@ -246,3 +246,33 @@ def render_digest(user, digest, title, description):
         html = get_template('digest-email.html').render(context)
 
     return (text, html)
+
+@statsd.timed('notifier.render_digest_flagged.elapsed')
+def render_digest_flagged(message):
+    """
+    Generate HTML and plaintext renderings of flagged digest material, suitable for
+    emailing.
+
+    Args:
+        message (dict): with the following keys:
+            course_id (str): identifier of the course
+            recipient (dict): user info
+            posts (list): post URLs
+
+    Returns:
+        (text_body, html_body)
+    """
+    logger.info("rendering email message: {%s}", message['recipient'])
+    context = Context({
+        'title': settings.FORUM_DIGEST_EMAIL_TITLE_FLAGGED,
+        'description': message['course_id'],
+        'thread_count': len(message['posts']),
+        'logo_image_url': settings.LOGO_IMAGE_URL,
+        'course_id': message['course_id'],
+        'posts': message['posts'],
+    })
+    with _activate_user_lang(message['recipient']):
+        text = get_template('digest-email-flagged.txt').render(context)
+        html = get_template('digest-email-flagged.html').render(context)
+    return (text, html)
+
