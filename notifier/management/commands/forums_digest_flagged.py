@@ -1,42 +1,86 @@
-from django.core.management.base import BaseCommand
-import logging
+"""
+Send a digest list of threads with flagged posts to forum moderators.
+"""
 from optparse import make_option
 
+from django.conf import settings
+from django.core.management.base import BaseCommand
+
+from notifier.digest import render_digest_flagged
+from notifier.pull import get_flagged_threads
 from notifier.tasks import do_forums_digests_flagged
+from notifier.user import get_moderators
 
-
-logger = logging.getLogger(__name__)
 
 class Command(BaseCommand):
     """
-    This Command is used to send a digest of flagged posts to forum moderators.
+    This Command is used to send a digest of threads with flagged posts to
+    forum moderators.
     """
 
-    help = "Send a digest list of flagged forum posts to each moderator"
+    help = "Send a digest list of threads with flagged posts to each moderator"
     option_list = BaseCommand.option_list + (
-        make_option(
-            '--posts-file',
-            action='store',
-            dest='posts_file',
-            default=None,
-            help='send digests for the specified posts only' +
-                ' (defaults to fetching post list via Heroku)',
-        ),
         make_option(
             '--is-dry-run',
             action='store_true',
             dest='is_dry_run',
             default=False,
-            help='display the course_id and email address' +
-                ' for each recipient WITHOUT sending a message',
+            help='for each course with flagged posts, display the email address'
+                 ' for each recipient, and the rendered email text WITHOUT'
+                 ' sending a message',
         ),
     )
 
+    def dry_run(self):
+        """
+        Print the recipients and rendered email text for each course with flagged posts.
+        """
+        course_threads = {}
+        for thread in get_flagged_threads():
+            course_id = thread.get('course_id')
+            commentable_id = thread.get('commentable_id')
+            comment_thread_id = thread.get('comment_thread_id')
+            if course_id and commentable_id and comment_thread_id:
+                if course_id not in course_threads:
+                    course_threads[course_id] = []
+                thread_url = '{base_url}/courses/{course_id}/discussion/forum/{commentable_id}/threads/{comment_thread_id}'.format(
+                    base_url=settings.LMS_URL_BASE,
+                    course_id=course_id,
+                    commentable_id=commentable_id,
+                    comment_thread_id=comment_thread_id,
+                )
+                course_threads[course_id].append(thread_url)
+
+        for course_id in course_threads:
+            moderators = get_moderators(course_id)
+            try:
+                # We only grab the first moderator because we're only concerned with rendering a single sample message.
+                # THe assumption is that each message will be the same for all moderators in a course.
+                user = moderators.next()
+            except StopIteration:
+                print('Course {course_id} has flagged posts but no moderators'.format(course_id=course_id))
+                continue
+            text, _ = render_digest_flagged({
+                'course_id': course_id,
+                'threads': course_threads[course_id],
+                'recipient': user,
+            })
+            print('==============================')
+            print("To: {email_address}".format(email_address=user.get('email')))
+            for user in moderators:
+                print("To: {email_address}".format(email_address=user.get('email')))
+            print("Subject: {subject}".format(subject=settings.FORUM_DIGEST_EMAIL_SUBJECT))
+            print(text)
+            print('==============================')
+
     def handle(self, *args, **options):
         """
-        Handle a request to send a digest of flagged posts to forum moderators.
+        Handle a request to send a digest of threads with flagged posts to forum
+        moderators.
         """
-        input_file = options.get('posts_file')
         is_dry_run = options.get('is_dry_run')
-        do_forums_digests_flagged(input_file, is_dry_run)
 
+        if is_dry_run:
+            self.dry_run()
+        else:
+            do_forums_digests_flagged()

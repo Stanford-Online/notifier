@@ -21,6 +21,24 @@ class CommentsServiceException(Exception):
     pass
 
 
+def _http_get(*a, **kw):
+    """
+    Helper for get HTTP requests to the comments service.
+    """
+    try:
+        logger.debug('GET %s %s', a[0], kw)
+        response = requests.get(*a, **kw)
+    except requests.exceptions.ConnectionError, e:
+        _, msg, tb = sys.exc_info()
+        raise CommentsServiceException, "comments service request failed: {}".format(msg), tb
+    if response.status_code != 200:
+        raise CommentsServiceException("comments service HTTP Error {code}: {reason}".format(
+            code=response.status_code,
+            reason=response.reason,
+        ))
+    return response
+
+
 def _http_post(*a, **kw):
     """
     Helper for posting HTTP requests to the comments service.
@@ -155,3 +173,30 @@ def generate_digest_content(users_by_id, from_dt, to_dt):
         resp = _http_post(api_url, headers=headers, data=data)
 
     return process_cs_response(resp.json(), users_by_id)
+
+
+def get_flagged_threads():
+    """
+    Generator function that calls the cs_comments_service API and yields a
+    thread dictionary for each flagged post.
+    """
+    api_url = "{base_url}/api/v1/flagged_threads".format(
+        base_url=settings.CS_URL_BASE,
+    )
+    params = {
+        'per_page': settings.CS_RESULT_PAGE_SIZE,
+        'page': 1,
+    }
+    headers = {
+        'X-Edx-Api-Key': settings.CS_API_KEY,
+    }
+
+    logger.info('calling comments service to get flagged threads')
+    while True:
+        with dog_stats_api.timer('notifier.flagged_threads.time'):
+            threads = _http_get(api_url, params=params, headers=headers).json()
+        for thread in threads:
+            yield thread
+        if not threads or len(threads) < settings.CS_RESULT_PAGE_SIZE:
+            break
+        params['page'] += 1

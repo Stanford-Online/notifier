@@ -12,11 +12,12 @@ sched = BlockingScheduler(standalone=True)
 def digest_job():
     do_forums_digests.delay()
 
+
 def digest_job_flagged():
     """
     Schedule this task via cron job
     """
-    do_forums_digests_flagged()
+    do_forums_digests_flagged.delay()
 
 class Command(BaseCommand):
 
@@ -38,6 +39,6 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         sched.add_job(digest_job, 'cron', **settings.DIGEST_CRON_SCHEDULE)
-        if settings.FLAGGED_FORUM_DIGEST_TASK_INTERVAL > 0:
+        if settings.FORUM_DIGEST_TASK_INTERVAL_FLAGGED > 0:
             sched.add_job(digest_job_flagged, 'cron', **settings.DIGEST_CRON_SCHEDULE_FLAGGED)
         sched.start()

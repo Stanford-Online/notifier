@@ -3,12 +3,11 @@
 from uuid import uuid4
 
 from unittest import skip
+from django.conf import settings
 from django.test import TestCase
 from mock import patch
 
-from notifier import settings
 from notifier.digest import Digest, DigestCourse, DigestItem, DigestThread, render_digest
-from notifier.digest import _get_thread_url
 from notifier.digest import render_digest_flagged
 from notifier.tests.test_tasks import usern
 from notifier.user import DIGEST_NOTIFICATION_PREFERENCE_KEY, LANGUAGE_PREFERENCE_KEY
@@ -72,18 +71,23 @@ class RenderDigestFlaggedTestCase(TestCase):
         """
         Test that rendered messages contain the correct text
         """
-        posts = [
-            _get_thread_url(TEST_COURSE_ID, TEST_COMMENTABLE, i)
-                for i in xrange(5)
+        threads = [
+            '{base_url}/courses/{course_id}/discussion/forum/{commentable_id}/threads/{comment_thread_id}'.format(
+                base_url=settings.LMS_URL_BASE,
+                course_id=TEST_COURSE_ID,
+                commentable_id=TEST_COMMENTABLE,
+                comment_thread_id=i,
+            )
+            for i in xrange(1, 6)
         ]
         message = {
-            "course_id": TEST_COURSE_ID,
-            "recipient": usern(1),
-            "posts": posts,
+            'course_id': TEST_COURSE_ID,
+            'recipient': usern(1),
+            'threads': threads,
         }
-        rendered_text, rendered_html = render_digest_flagged(message)
-        for post in posts:
-            self.assertIn(post, rendered_text)
+        rendered_text, _ = render_digest_flagged(message)
+        for thread in threads:
+            self.assertIn(thread, rendered_text)
 
 
 @patch("notifier.digest.THREAD_TITLE_MAXLEN", 17)

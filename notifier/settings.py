@@ -66,9 +66,10 @@ EMAIL_REWRITE_RECIPIENT = os.getenv('EMAIL_REWRITE_RECIPIENT')
 # LMS links, images, etc
 LMS_URL_BASE = os.getenv('LMS_URL_BASE', 'http://localhost:8000')
 
-# Comments Service Endpoint, for digest pulls
+# Comments Service Endpoint, for digest pulls and flagged thread pulls
 CS_URL_BASE = os.getenv('CS_URL_BASE', 'http://localhost:4567')
 CS_API_KEY = os.getenv('CS_API_KEY', 'PUT_YOUR_API_KEY_HERE')
+CS_RESULT_PAGE_SIZE = 10
 
 # User Service Endpoint, provides subscriber lists and notification-related user data
 US_URL_BASE = os.getenv('US_URL_BASE', 'http://localhost:8000')
@@ -217,11 +218,3 @@ LOCALE_PATHS = (os.path.join(os.path.dirname(os.path.dirname(__file__)), 'locale
 
 # Parameterize digest logo image url
 LOGO_IMAGE_URL = os.getenv('LOGO_IMAGE_URL', "{}/static/images/edx-theme/edx-header-logo.png".format(LMS_URL_BASE))
-
-HEROKU_USERNAME = os.getenv('HEROKU_USERNAME', '')
-HEROKU_PASSWORD = os.getenv('HEROKU_PASSWORD', '')
-HEROKU_COMMAND_FLAGGED = os.getenv(
-    'HEROKU_COMMAND_FLAGGED',
-    "cat notifier/tests/fixtures/flagged.list",
-)
-

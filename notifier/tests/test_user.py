@@ -24,6 +24,17 @@ mkresult = lambda n: {
 }
 mkexpected = lambda d: dict([(key, val) for (key, val) in d.items() if key != "url"])
 
+
+def make_response(count=0):
+    """Return fixture json response of users."""
+    return {
+        "count": count,
+        "next": None,
+        "previous": None,
+        "results": [mkresult(i) for i in xrange(count)],
+    }
+
+
 @override_settings(US_API_KEY=TEST_API_KEY)
 class RoleTestCase(TestCase):
     """
@@ -43,39 +54,29 @@ class RoleTestCase(TestCase):
         }
 
     @override_settings(US_URL_BASE="test_server_url", US_RESULT_PAGE_SIZE=3)
-    def test_get_users_empty(self):
+    def test_get_moderators_empty(self):
         """
         Test that an empty moderator list can be retrieved
         """
-        expected_empty = {
-            "count": 0,
-            "next": None,
-            "previous": None,
-            "results": [],
-        }
-        with patch('requests.get', return_value=Mock(json=expected_empty)) as p:
+        expected_empty = make_response()
+        mock_response = make_mock_json_response(json=expected_empty)
+        with patch('requests.get', return_value=mock_response) as p:
             result = list(get_moderators(self.course_id))
             p.assert_called_once_with(
                 self.expected_api_url,
                 params=self.expected_params,
                 headers=self.expected_headers,
             )
+            self.assertEqual(0, len(result))
 
     @override_settings(US_URL_BASE="test_server_url", US_RESULT_PAGE_SIZE=3)
-    def test_get_users_single_page(self):
+    def test_get_moderators_single_page(self):
         """
         Test that a moderator list can be retrieved
         """
-        expected = {
-            "count": 3,
-            "next": None,
-            "previous": None,
-            "results": [
-                mkresult(i) for i in xrange(3)
-            ],
-        }
-
-        with patch('requests.get', return_value=Mock(json=expected)) as p:
+        expected = make_response(3)
+        mock_response = make_mock_json_response(json=expected)
+        with patch('requests.get', return_value=mock_response) as p:
             result = get_moderators(self.course_id)
             result = list(result)
             p.assert_called_once_with(
@@ -87,32 +88,25 @@ class RoleTestCase(TestCase):
             self.assertEqual(expected['count'], len(result))
 
     @override_settings(US_URL_BASE="test_server_url", US_RESULT_PAGE_SIZE=3, US_HTTP_AUTH_USER='someuser', US_HTTP_AUTH_PASS='somepass')
-    def test_get_users_basic_auth(self):
+    def test_get_moderators_basic_auth(self):
         """
         Test that basic auth works
         """
-        expected = {
-            "count": 3,
-            "next": None,
-            "previous": None,
-            "results": [
-                mkresult(i) for i in xrange(10)
-            ],
-        }
-
-        with patch('requests.get', return_value=Mock(json=expected)) as p:
+        expected = make_response(3)
+        mock_response = make_mock_json_response(json=expected)
+        with patch('requests.get', return_value=mock_response) as p:
             result = get_moderators(self.course_id)
             result = list(result)
             p.assert_called_once_with(
-                    self.expected_api_url,
-                    params=self.expected_params,
-                    headers=self.expected_headers,
-                    auth=('someuser', 'somepass'),
+                self.expected_api_url,
+                params=self.expected_params,
+                headers=self.expected_headers,
+                auth=('someuser', 'somepass'),
             )
             self.assertEqual(result, expected['results'])
 
     @override_settings(US_URL_BASE="test_server_url", US_RESULT_PAGE_SIZE=3)
-    def test_get_users_multi_page(self):
+    def test_get_moderators_multi_page(self):
         """
         Test that a moderator list can be paged
         """
@@ -134,13 +128,10 @@ class RoleTestCase(TestCase):
                 ],
             },
         ]
-        def side_effect(*a, **kw):
-            return expected_pages.pop(0)
 
-        mock = Mock()
-        with patch('requests.get', return_value=mock) as p:
+        mock_response = make_mock_json_response(json=expected_pages[0])
+        with patch('requests.get', return_value=mock_response) as p:
             result = []
-            mock.json = expected_pages[0]
             users = get_moderators(self.course_id)
             result.append(users.next())
             p.assert_called_once_with(
@@ -148,7 +139,7 @@ class RoleTestCase(TestCase):
                 params=self.expected_params,
                 headers=self.expected_headers)
             result.append(users.next())
-            result.append(users.next()) # result 3, end of page
+            result.append(users.next())  # result 3, end of page
             self.assertEqual(
                 [
                     mkexpected(mkresult(i)) for i in xrange(1, 4)
@@ -158,9 +149,9 @@ class RoleTestCase(TestCase):
             # still should only have called requests.get() once
             self.assertEqual(1, p.call_count)
 
-            p.reset_mock() # reset call count
+            p.reset_mock()  # reset call count
             self.expected_params['page'] = 2
-            mock.json = expected_pages[1]
+            mock_response.json.return_value = expected_pages[1]
             self.assertEqual(mkexpected(mkresult(4)), users.next())
             p.assert_called_once_with(
                 self.expected_api_url,
