@@ -20,6 +20,16 @@ from notifier.user import get_moderators
 
 logger = logging.getLogger(__name__)
 
+COMMENT_THREAD_URL_FORMAT = '/'.join([
+    "{base_url}",
+    "courses",
+    "{course_id}",
+    "discussion",
+    "forum",
+    "{commentable_id}",
+    "threads",
+    "{comment_thread_id}",
+])
 
 @celery.task(rate_limit=settings.FORUM_DIGEST_TASK_RATE_LIMIT, max_retries=settings.FORUM_DIGEST_TASK_MAX_RETRIES)
 def generate_and_send_digests(users, from_dt, to_dt):
@@ -89,14 +99,17 @@ def generate_and_send_digests_flagged(raw_msgs):
     with closing(get_connection()) as connection:
         try:
             connection.send_messages(rendered_msgs)
-        except SESMaxSendingRateExceededError as e:
+        except SESMaxSendingRateExceededError as error:
             # we've tripped the per-second send rate limit.  we generally
             # rely  on the django_ses auto throttle to prevent this,
             # but in case we creep over, we can re-queue and re-try this task
             # - if and only if none of the messages in our batch were
             # sent yet.
-            if not any((getattr(rendered_msg, 'extra_headers', {}).get('status') == 200 for rendered_msg in rendered_msgs)):
-                raise generate_and_send_digests_flagged.retry(exc=e)
+            if not any((
+                    getattr(rendered_msg, 'extra_headers', {}).get('status') == 200
+                    for rendered_msg in rendered_msgs
+            )):
+                raise generate_and_send_digests_flagged.retry(exc=error)
             else:
                 # raise right away, since we don't support partial retry
                 raise
@@ -167,7 +180,7 @@ def do_forums_digests_flagged():
             if course_id and commentable_id and comment_thread_id:
                 if course_id not in output:
                     output[course_id] = []
-                thread_url = '{base_url}/courses/{course_id}/discussion/forum/{commentable_id}/threads/{comment_thread_id}'.format(
+                thread_url = COMMENT_THREAD_URL_FORMAT.format(
                     base_url=settings.LMS_URL_BASE,
                     course_id=course_id,
                     commentable_id=commentable_id,
@@ -211,8 +224,8 @@ def do_forums_digests_flagged():
     try:
         for batch in batch_messages():
             generate_and_send_digests_flagged.delay(batch)
-    except (CommentsServiceException, UserServiceException) as e:
-        raise do_forums_digests_flagged.retry(exc=e)
+    except (CommentsServiceException, UserServiceException) as error:
+        raise do_forums_digests_flagged.retry(exc=error)
 
 
 @celery.task(max_retries=settings.DAILY_TASK_MAX_RETRIES, default_retry_delay=settings.DAILY_TASK_RETRY_DELAY)

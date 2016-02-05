@@ -28,9 +28,9 @@ def _http_get(*a, **kw):
     try:
         logger.debug('GET %s %s', a[0], kw)
         response = requests.get(*a, **kw)
-    except requests.exceptions.ConnectionError, e:
-        _, msg, tb = sys.exc_info()
-        raise CommentsServiceException, "comments service request failed: {}".format(msg), tb
+    except requests.exceptions.ConnectionError:
+        _, msg, traceback = sys.exc_info()
+        raise CommentsServiceException, "comments service request failed: {}".format(msg), traceback
     if response.status_code != 200:
         raise CommentsServiceException("comments service HTTP Error {code}: {reason}".format(
             code=response.status_code,

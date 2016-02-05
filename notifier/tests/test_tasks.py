@@ -12,13 +12,13 @@ from django.test import TestCase
 from django.test.utils import override_settings
 from mock import patch, Mock
 
+from notifier.tasks import COMMENT_THREAD_URL_FORMAT
 from notifier.tasks import generate_and_send_digests, do_forums_digests
 from notifier.tasks import generate_and_send_digests_flagged
 from notifier.tasks import do_forums_digests_flagged
 from notifier.pull import process_cs_response, CommentsServiceException
 from notifier.user import UserServiceException, DIGEST_NOTIFICATION_PREFERENCE_KEY
 from .utils import make_user_info
-
 
 TEST_COURSE_ID = 'org/course/run'
 TEST_COMMENTABLE = 'test_commentable'
@@ -236,6 +236,9 @@ class TasksTestCase(TestCase):
         Test that partial retries are not attempted
         """
         def side_effect(msgs):
+            """
+            Raise a throttling exception
+            """
             msgs[0].extra_headers['status'] = 200
             raise SESMaxSendingRateExceededError(400, 'Throttling')
 
@@ -250,7 +253,7 @@ class TasksTestCase(TestCase):
             # execute task - should fail, and not retry
             try:
                 generate_and_send_digests_flagged.delay(messages)
-            except SESMaxSendingRateExceededError as e:
+            except SESMaxSendingRateExceededError:
                 self.assertEqual(mock_backend.send_messages.call_count, 1)
 
     def test_generate_and_send_digests_flagged_retry_ses(self):
@@ -269,26 +272,26 @@ class TasksTestCase(TestCase):
             # give up
             try:
                 generate_and_send_digests_flagged.delay(messages)
-            except SESMaxSendingRateExceededError as e:
+            except SESMaxSendingRateExceededError:
                 self.assertEqual(
                     mock_backend.send_messages.call_count,
                     expected_num_tries,
                 )
 
     @override_settings(FORUM_DIGEST_TASK_BATCH_SIZE=9)
-    def test_do_forums_digests_flagged(self):
+    @patch('notifier.tasks.get_moderators', return_value=(usern(i) for i in xrange(10)))
+    @patch('notifier.tasks.generate_and_send_digests_flagged')
+    @patch('notifier.tasks.get_flagged_threads', return_value=make_flagged_threads())
+    def test_do_forums_digests_flagged(self, _get_threads, generate, get_moderators):
         """
         Test that we can send forum digests for flagged posts
         """
-        test_threads = make_flagged_threads()
-        test_moderators = (usern(i) for i in xrange(10))
-
         last_message_batch = [
             {
                 'course_id': TEST_COURSE_ID,
                 'recipient': usern(9),
                 'threads': [
-                    '{base_url}/courses/{course_id}/discussion/forum/{commentable_id}/threads/{comment_thread_id}'.format(
+                    COMMENT_THREAD_URL_FORMAT.format(
                         base_url=settings.LMS_URL_BASE,
                         course_id=TEST_COURSE_ID,
                         commentable_id=TEST_COMMENTABLE,
@@ -298,44 +301,38 @@ class TasksTestCase(TestCase):
                 ],
             }
         ]
-
-        with patch('notifier.tasks.get_flagged_threads', return_value=test_threads), \
-                patch('notifier.tasks.get_moderators', return_value=test_moderators) as m, \
-                patch('notifier.tasks.generate_and_send_digests_flagged') as t:
-            task_result = do_forums_digests_flagged.delay()
-            self.assertTrue(task_result.successful())
-            m.assert_called_with(TEST_COURSE_ID)
-            self.assertEqual(t.delay.call_count, 2)
-            t.delay.assert_called_with(last_message_batch)
+        task_result = do_forums_digests_flagged.delay()
+        self.assertTrue(task_result.successful())
+        get_moderators.assert_called_with(TEST_COURSE_ID)
+        self.assertEqual(generate.delay.call_count, 2)
+        generate.delay.assert_called_with(last_message_batch)
 
     @override_settings(FORUM_DIGEST_TASK_BATCH_SIZE=10)
-    def test_do_forums_digests_flagged_user_api_unavailable(self):
+    @patch('notifier.tasks.get_moderators', side_effect=UserServiceException("could not connect!"))
+    @patch('notifier.tasks.generate_and_send_digests_flagged')
+    @patch('notifier.tasks.get_flagged_threads', return_value=make_flagged_threads())
+    def test_do_forums_digests_flagged_user_api_unavailable(self, _get_threads, generate, get_moderators):
         """
         Test that retries are attempted if user API is down.
         """
-        test_threads = make_flagged_threads()
-
-        with patch('notifier.tasks.get_flagged_threads', return_value=test_threads), \
-                patch('notifier.tasks.get_moderators', side_effect=UserServiceException("could not connect!")) as m, \
-                patch('notifier.tasks.generate_and_send_digests_flagged') as t:
-            try:
-                do_forums_digests_flagged.delay()
-            except UserServiceException as e:
-                self.assertEqual(m.call_count, settings.DAILY_TASK_MAX_RETRIES + 1)
-                self.assertEqual(t.call_count, 0)
+        try:
+            do_forums_digests_flagged.delay()
+        except UserServiceException:
+            self.assertEqual(get_moderators.call_count, settings.DAILY_TASK_MAX_RETRIES + 1)
+            self.assertEqual(generate.call_count, 0)
 
     @override_settings(FORUM_DIGEST_TASK_BATCH_SIZE=10)
-    def test_do_forums_digests_flagged_cs_api_unavailable(self):
+    @patch('notifier.tasks.get_flagged_threads', side_effect=CommentsServiceException('could not connect!'))
+    @patch('notifier.tasks.generate_and_send_digests_flagged')
+    def test_do_forums_digests_flagged_cs_api_unavailable(self, generate, get):
         """
         Test that retries are attempted if comments service API is down.
         """
-        with patch('notifier.tasks.get_flagged_threads', side_effect=CommentsServiceException("could not connect!")) as f, \
-                patch('notifier.tasks.generate_and_send_digests_flagged') as t:
-            try:
-                do_forums_digests_flagged.delay()
-            except CommentsServiceException as e:
-                self.assertEqual(f.call_count, settings.DAILY_TASK_MAX_RETRIES + 1)
-                self.assertEqual(t.call_count, 0)
+        try:
+            do_forums_digests_flagged.delay()
+        except CommentsServiceException:
+            self.assertEqual(get.call_count, settings.DAILY_TASK_MAX_RETRIES + 1)
+            self.assertEqual(generate.call_count, 0)
 
     @override_settings(FORUM_DIGEST_TASK_BATCH_SIZE=10)
     def test_do_forums_digests(self):

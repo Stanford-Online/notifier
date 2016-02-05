@@ -418,9 +418,9 @@ class GetFlaggedThreadsTestCase(TestCase):
         Test that an empty thread list can be retrieved.
         """
         mock_response = make_mock_json_response(json=[])
-        with patch('requests.get', return_value=mock_response) as p:
+        with patch('requests.get', return_value=mock_response) as patched:
             result = list(get_flagged_threads())
-            p.assert_called_once_with(
+            patched.assert_called_once_with(
                 self.expected_api_url,
                 params=self.expected_params,
                 headers=self.expected_headers,

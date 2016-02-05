@@ -29,20 +29,18 @@ class CommandsTestCase(TestCase):
     def test_forums_digest(self):
         pass
 
-    def test_forums_digests_flagged_dry(self):
+    @patch('notifier.user.get_moderators', return_value=(usern(i) for i in xrange(10)))
+    @patch('notifier.pull.get_flagged_threads', return_value=make_flagged_threads())
+    def test_forums_digests_flagged_dry(self, _get_threads, _get_moderators):
         """
         Test that command with dry run option works.
         """
-        test_threads = make_flagged_threads()
-        test_moderators = (usern(i) for i in xrange(10))
-        with patch('notifier.management.commands.forums_digest_flagged.get_flagged_threads', return_value=test_threads), \
-                patch('notifier.management.commands.forums_digest_flagged.get_moderators', return_value=test_moderators):
-            out = sys.stdout
-            sys.stdout = StringIO()
-            management.call_command('forums_digest_flagged', is_dry_run=True)
-            output = sys.stdout.getvalue()
-            for i in xrange(10):
-                self.assertIn("To: {}".format(usern(i)['email']), output)
-            self.assertIn(self.test_course, output)
-            sys.stdout.close()
-            sys.stdout = out
+        out = sys.stdout
+        sys.stdout = StringIO()
+        management.call_command('forums_digest_flagged', is_dry_run=True)
+        output = sys.stdout.getvalue()  # pylint: disable=no-member
+        for i in xrange(10):
+            self.assertIn("To: {}".format(usern(i)['email']), output)
+        self.assertIn(self.test_course, output)
+        sys.stdout.close()
+        sys.stdout = out

@@ -60,9 +60,9 @@ class RoleTestCase(TestCase):
         """
         expected_empty = make_response()
         mock_response = make_mock_json_response(json=expected_empty)
-        with patch('requests.get', return_value=mock_response) as p:
+        with patch('requests.get', return_value=mock_response) as patched:
             result = list(get_moderators(self.course_id))
-            p.assert_called_once_with(
+            patched.assert_called_once_with(
                 self.expected_api_url,
                 params=self.expected_params,
                 headers=self.expected_headers,
@@ -76,10 +76,10 @@ class RoleTestCase(TestCase):
         """
         expected = make_response(3)
         mock_response = make_mock_json_response(json=expected)
-        with patch('requests.get', return_value=mock_response) as p:
+        with patch('requests.get', return_value=mock_response) as patched:
             result = get_moderators(self.course_id)
             result = list(result)
-            p.assert_called_once_with(
+            patched.assert_called_once_with(
                 self.expected_api_url,
                 params=self.expected_params,
                 headers=self.expected_headers
@@ -87,17 +87,22 @@ class RoleTestCase(TestCase):
             self.assertEqual(result, expected['results'])
             self.assertEqual(expected['count'], len(result))
 
-    @override_settings(US_URL_BASE="test_server_url", US_RESULT_PAGE_SIZE=3, US_HTTP_AUTH_USER='someuser', US_HTTP_AUTH_PASS='somepass')
+    @override_settings(
+        US_URL_BASE="test_server_url",
+        US_RESULT_PAGE_SIZE=3,
+        US_HTTP_AUTH_USER='someuser',
+        US_HTTP_AUTH_PASS='somepass',
+    )
     def test_get_moderators_basic_auth(self):
         """
         Test that basic auth works
         """
         expected = make_response(3)
         mock_response = make_mock_json_response(json=expected)
-        with patch('requests.get', return_value=mock_response) as p:
+        with patch('requests.get', return_value=mock_response) as patched:
             result = get_moderators(self.course_id)
             result = list(result)
-            p.assert_called_once_with(
+            patched.assert_called_once_with(
                 self.expected_api_url,
                 params=self.expected_params,
                 headers=self.expected_headers,
@@ -130,11 +135,11 @@ class RoleTestCase(TestCase):
         ]
 
         mock_response = make_mock_json_response(json=expected_pages[0])
-        with patch('requests.get', return_value=mock_response) as p:
+        with patch('requests.get', return_value=mock_response) as patched:
             result = []
             users = get_moderators(self.course_id)
             result.append(users.next())
-            p.assert_called_once_with(
+            patched.assert_called_once_with(
                 self.expected_api_url,
                 params=self.expected_params,
                 headers=self.expected_headers)
@@ -147,18 +152,18 @@ class RoleTestCase(TestCase):
                 result
             )
             # still should only have called requests.get() once
-            self.assertEqual(1, p.call_count)
+            self.assertEqual(1, patched.call_count)
 
-            p.reset_mock()  # reset call count
+            patched.reset_mock()  # reset call count
             self.expected_params['page'] = 2
             mock_response.json.return_value = expected_pages[1]
             self.assertEqual(mkexpected(mkresult(4)), users.next())
-            p.assert_called_once_with(
+            patched.assert_called_once_with(
                 self.expected_api_url,
                 params=self.expected_params,
                 headers=self.expected_headers)
             self.assertEqual(mkexpected(mkresult(5)), users.next())
-            self.assertEqual(1, p.call_count)
+            self.assertEqual(1, patched.call_count)
             self.assertRaises(StopIteration, users.next)
 
 
