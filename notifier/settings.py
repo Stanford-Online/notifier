@@ -23,10 +23,6 @@ INSTALLED_APPS = (
 
 SERVICE_NAME = 'notifier'
 
-# django coverage
-TEST_RUNNER = 'django_coverage.coverage_runner.CoverageRunner'
-
-
 # Misc. Notifier Formatting
 
 FORUM_DIGEST_EMAIL_SENDER = os.getenv('FORUM_DIGEST_EMAIL_SENDER', 'notifications@example.org')
@@ -63,10 +59,6 @@ EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS')
 # email settings independent of backend
 EMAIL_REWRITE_RECIPIENT = os.getenv('EMAIL_REWRITE_RECIPIENT')
 
-# secret key for generating unsub tokens
-# this MUST be changed in production envs, and MUST match the LMS' secret key
-SECRET_KEY = os.getenv('SECRET_KEY', '85920908f28904ed733fe576320db18cabd7b6cd')
-
 # LMS links, images, etc
 LMS_URL_BASE = os.getenv('LMS_URL_BASE', 'http://localhost:8000')
 
@@ -74,7 +66,7 @@ LMS_URL_BASE = os.getenv('LMS_URL_BASE', 'http://localhost:8000')
 CS_URL_BASE = os.getenv('CS_URL_BASE', 'http://localhost:4567')
 CS_API_KEY = os.getenv('CS_API_KEY', 'PUT_YOUR_API_KEY_HERE')
 
-# User Service Endpoint, for notification prefs
+# User Service Endpoint, provides subscriber lists and notification-related user data
 US_URL_BASE = os.getenv('US_URL_BASE', 'http://localhost:8000')
 US_API_KEY = os.getenv('US_API_KEY', 'PUT_YOUR_API_KEY_HERE')
 US_HTTP_AUTH_USER = os.getenv('US_HTTP_AUTH_USER', '')
@@ -93,8 +85,8 @@ import djcelery
 djcelery.setup_loader()
 BROKER_URL = os.getenv('BROKER_URL', 'django://')
 
-# limit the frequency with which the forum digest task may run.
-FORUM_DIGEST_TASK_RATE_LIMIT = "6/m" # no more than every 10 seconds
+# limit the frequency at which the forum digest celery task may be run.
+FORUM_DIGEST_TASK_RATE_LIMIT = os.getenv('FORUM_DIGEST_TASK_RATE_LIMIT', '6/m')
 # limit the size of user batches (cs service pulls / emails sent) per-task 
 FORUM_DIGEST_TASK_BATCH_SIZE = int(os.getenv('FORUM_DIGEST_TASK_BATCH_SIZE', 5))
 # limit the number of times an individual task will be retried
@@ -166,7 +158,8 @@ if LOG_FILE:
     })
     LOGGING['loggers']['']['handlers'].append('file')
 
-CELERY_TIMEZONE = 'UTC'
+TIME_ZONE = 'UTC'  # what task workers see
+CELERY_TIMEZONE = 'UTC'  # what the main celery process sees 
 
 # set up schedule for forum digest job
 if FORUM_DIGEST_TASK_INTERVAL==1440:
@@ -195,10 +188,17 @@ CELERYD_PREFETCH_MULTIPLIER = 1
 LANGUAGE_CODE = os.getenv('NOTIFIER_LANGUAGE', 'en')
 LANGUAGES = (
     ("en", "English"),
+    ("ar", "Arabic"),
+    ("es_419", "Spanish (Latin America)"),
     ("fr", "French"),
+    ("he", "Hebrew"),
+    ("hi", "Hindi"),
+    ("pt_BR", "Portuguese (Brazil)"),
+    ("ru", "Russian"),
+    ("zh_CN", "Chinese (Simplified)"),
 )
 USE_L10N = True
 LOCALE_PATHS = (os.path.join(os.path.dirname(os.path.dirname(__file__)), 'locale'),)
 
 # Parameterize digest logo image url
-LOGO_IMAGE_URL = os.getenv('LOGO_IMAGE_URL', "{}/static/images/header-logo.png".format(LMS_URL_BASE))
+LOGO_IMAGE_URL = os.getenv('LOGO_IMAGE_URL', "{}/static/images/edx-theme/edx-header-logo.png".format(LMS_URL_BASE))
