@@ -23,6 +23,7 @@ from notifier.pull import (
     _build_digest_item,
     generate_digest_content
 )
+from notifier.pull import get_flagged_threads
 
 from .utils import make_mock_json_response, make_user_info
 
@@ -394,3 +395,34 @@ class GenerateDigestContentTestCase(DigestTestCase):
                     set(thread_titles),
                     "Set of returned digest threads does not equal expected results"
                 )
+
+
+@override_settings(CS_URL_BASE='*test_cs_url*', CS_API_KEY='*test_cs_key*')
+class GetFlaggedThreadsTestCase(TestCase):
+    """
+    Test comments service API for flagged threads.
+    """
+    def setUp(self):
+        """
+        Setup common test state.
+        """
+        self.expected_api_url = '*test_cs_url*/api/v1/flagged_threads'
+        self.expected_headers = {'X-Edx-Api-Key': '*test_cs_key*'}
+        self.expected_params = {
+            'per_page': 10,
+            'page': 1,
+        }
+
+    def test_get_flagged_threads_empty(self):
+        """
+        Test that an empty thread list can be retrieved.
+        """
+        mock_response = make_mock_json_response(json=[])
+        with patch('requests.get', return_value=mock_response) as patched:
+            result = list(get_flagged_threads())
+            patched.assert_called_once_with(
+                self.expected_api_url,
+                params=self.expected_params,
+                headers=self.expected_headers,
+            )
+            self.assertEqual(0, len(result))

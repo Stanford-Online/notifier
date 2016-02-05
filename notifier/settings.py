@@ -28,6 +28,10 @@ SERVICE_NAME = 'notifier'
 FORUM_DIGEST_EMAIL_SENDER = os.getenv('FORUM_DIGEST_EMAIL_SENDER', 'notifications@example.org')
 FORUM_DIGEST_EMAIL_SUBJECT = os.getenv('FORUM_DIGEST_EMAIL_SUBJECT', 'Daily Discussion Digest')
 FORUM_DIGEST_EMAIL_TITLE = os.getenv('FORUM_DIGEST_EMAIL_TITLE', 'Discussion Digest')
+FORUM_DIGEST_EMAIL_TITLE_FLAGGED = os.getenv(
+    'FORUM_DIGEST_EMAIL_TITLE_FLAGGED',
+    'Flagged Posts Digest'
+)
 FORUM_DIGEST_EMAIL_DESCRIPTION = os.getenv(
     'FORUM_DIGEST_EMAIL_DESCRIPTION',
     'A digest of unread content from course discussions you are following.'
@@ -62,9 +66,10 @@ EMAIL_REWRITE_RECIPIENT = os.getenv('EMAIL_REWRITE_RECIPIENT')
 # LMS links, images, etc
 LMS_URL_BASE = os.getenv('LMS_URL_BASE', 'http://localhost:8000')
 
-# Comments Service Endpoint, for digest pulls
+# Comments Service Endpoint, for digest pulls and flagged thread pulls
 CS_URL_BASE = os.getenv('CS_URL_BASE', 'http://localhost:4567')
 CS_API_KEY = os.getenv('CS_API_KEY', 'PUT_YOUR_API_KEY_HERE')
+CS_RESULT_PAGE_SIZE = 10
 
 # User Service Endpoint, provides subscriber lists and notification-related user data
 US_URL_BASE = os.getenv('US_URL_BASE', 'http://localhost:8000')
@@ -95,6 +100,7 @@ FORUM_DIGEST_TASK_MAX_RETRIES = 2
 FORUM_DIGEST_TASK_RETRY_DELAY = 300
 # set the interval (in minutes) at which the top-level digest task is triggered
 FORUM_DIGEST_TASK_INTERVAL = int(os.getenv('FORUM_DIGEST_TASK_INTERVAL', 1440))
+FORUM_DIGEST_TASK_INTERVAL_FLAGGED = int(os.getenv('FORUM_DIGEST_TASK_INTERVAL_FLAGGED', 0))
 
 
 LOGGING = {
@@ -168,6 +174,16 @@ if FORUM_DIGEST_TASK_INTERVAL==1440:
     DIGEST_CRON_SCHEDULE = {'hour': 0}
 else:
     DIGEST_CRON_SCHEDULE = {'minute': '*/{}'.format(FORUM_DIGEST_TASK_INTERVAL) }
+
+# set up schedule for flagged forum digest job
+if FORUM_DIGEST_TASK_INTERVAL_FLAGGED == 1440:
+    # in the production case, make the 24 hour cycle happen at a
+    # predetermined time of day (midnight UTC)
+    DIGEST_CRON_SCHEDULE_FLAGGED = {'hour': 0}
+else:
+    DIGEST_CRON_SCHEDULE_FLAGGED = {
+        'minute': '*/{}'.format(FORUM_DIGEST_TASK_INTERVAL_FLAGGED),
+    }
 
 DAILY_TASK_MAX_RETRIES = 2
 DAILY_TASK_RETRY_DELAY = 60

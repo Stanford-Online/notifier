@@ -66,6 +66,38 @@ def get_digest_subscribers():
         params['page'] += 1
 
 
+def get_moderators(course_id):
+    """
+    Generator function that calls the edX user API and yields an email address
+    for each user listed as a moderator for the specified course.
+
+    Args:
+        course_id (str): course identifier
+
+    Return:
+        users (gen): generator of users
+    """
+    api_url = "{base_url}/user_api/v1/forum_roles/Moderator/users/".format(
+        base_url=settings.US_URL_BASE,
+    )
+    params = {
+        'page_size': settings.US_RESULT_PAGE_SIZE,
+        'page': 1,
+        'course_id': course_id,
+    }
+    logger.info('calling user api for forum moderators')
+    while True:
+        with dog_stats_api.timer('notifier.get_moderators.time'):
+            data = _http_get(api_url, params=params, headers=_headers(), **_auth()).json()
+        for result in data['results']:
+            if 'url' in result:
+                del result['url']
+            yield result
+        if data['next'] is None:
+            break
+        params['page'] += 1
+
+
 def get_user(user_id):
     api_url = '{}/notifier_api/v1/users/{}/'.format(settings.US_URL_BASE, user_id)
     logger.info('calling user api for user %s', user_id)

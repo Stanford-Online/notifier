@@ -12,11 +12,24 @@ from django.core.mail import EmailMultiAlternatives
 
 from notifier.connection_wrapper import get_connection
 from notifier.digest import render_digest
+from notifier.digest import render_digest_flagged
 from notifier.pull import generate_digest_content, CommentsServiceException
+from notifier.pull import get_flagged_threads
 from notifier.user import get_digest_subscribers, UserServiceException
+from notifier.user import get_moderators
 
 logger = logging.getLogger(__name__)
 
+COMMENT_THREAD_URL_FORMAT = '/'.join([
+    "{base_url}",
+    "courses",
+    "{course_id}",
+    "discussion",
+    "forum",
+    "{commentable_id}",
+    "threads",
+    "{comment_thread_id}",
+])
 
 @celery.task(rate_limit=settings.FORUM_DIGEST_TASK_RATE_LIMIT, max_retries=settings.FORUM_DIGEST_TASK_MAX_RETRIES)
 def generate_and_send_digests(users, from_dt, to_dt):
@@ -58,6 +71,48 @@ def generate_and_send_digests(users, from_dt, to_dt):
         else:
             # raise right away, since we don't support partial retry
             raise
+
+
+@celery.task(rate_limit=settings.FORUM_DIGEST_TASK_RATE_LIMIT, max_retries=settings.FORUM_DIGEST_TASK_MAX_RETRIES)
+def generate_and_send_digests_flagged(raw_msgs):
+    """
+    This task generates and sends flagged forum digest emails to multiple users
+    in a single background operation.
+
+    Args:
+        raw_msgs (list): contains dicts with the following keys:
+            course_id (str): identifier of the course
+            recipient (dict): a single user dict
+            threads (list): a list of thread URLs
+    """
+    rendered_msgs = []
+    for raw_msg in raw_msgs:
+        text, html = render_digest_flagged(raw_msg)
+        rendered_msg = EmailMultiAlternatives(
+            settings.FORUM_DIGEST_EMAIL_SUBJECT,
+            text,
+            settings.FORUM_DIGEST_EMAIL_SENDER,
+            [raw_msg['recipient']['email']],
+        )
+        rendered_msg.attach_alternative(html, "text/html")
+        rendered_msgs.append(rendered_msg)
+    with closing(get_connection()) as connection:
+        try:
+            connection.send_messages(rendered_msgs)
+        except SESMaxSendingRateExceededError as error:
+            # we've tripped the per-second send rate limit.  we generally
+            # rely  on the django_ses auto throttle to prevent this,
+            # but in case we creep over, we can re-queue and re-try this task
+            # - if and only if none of the messages in our batch were
+            # sent yet.
+            if not any((
+                    getattr(rendered_msg, 'extra_headers', {}).get('status') == 200
+                    for rendered_msg in rendered_msgs
+            )):
+                raise generate_and_send_digests_flagged.retry(exc=error)
+            else:
+                # raise right away, since we don't support partial retry
+                raise
 
 def _time_slice(minutes, now=None):
     """
@@ -103,6 +158,75 @@ def _time_slice(minutes, now=None):
     dt_end = midnight + timedelta(minutes=(minutes_since_midnight / minutes) * minutes)
     dt_start = dt_end - timedelta(minutes=minutes)
     return (dt_start, dt_end)
+
+
+@celery.task(max_retries=settings.DAILY_TASK_MAX_RETRIES, default_retry_delay=settings.DAILY_TASK_RETRY_DELAY)
+def do_forums_digests_flagged():
+    """
+    Generate and batch send digest emails for each thread with flagged posts.
+    """
+    def get_course_threads():
+        """
+        Process threads from comments service API and group by course_id.
+
+        Returns:
+            dict: key=course_id, value=list of thread URLs with flagged posts
+        """
+        output = {}
+        for thread in get_flagged_threads():
+            course_id = thread.get('course_id')
+            commentable_id = thread.get('commentable_id')
+            comment_thread_id = thread.get('comment_thread_id')
+            if course_id and commentable_id and comment_thread_id:
+                if course_id not in output:
+                    output[course_id] = []
+                thread_url = COMMENT_THREAD_URL_FORMAT.format(
+                    base_url=settings.LMS_URL_BASE,
+                    course_id=course_id,
+                    commentable_id=commentable_id,
+                    comment_thread_id=comment_thread_id,
+                )
+                output[course_id].append(thread_url)
+        return output
+
+    def get_messages():
+        """
+        Yield message dicts to be used for sending digest emails to moderators.
+
+        Returns:
+            dict generator:
+                course_id (str): course identifier
+                threads (list): strings of thread URLs
+                recipient (dict): a single user
+        """
+        course_threads = get_course_threads()
+        for course_id in course_threads:
+            for user in get_moderators(course_id):
+                yield {
+                    'course_id': course_id,
+                    'threads': course_threads[course_id],
+                    'recipient': user,
+                }
+
+    def batch_messages():
+        """
+        Yield batches of messages to send.
+        """
+        batch = []
+        for message in get_messages():
+            batch.append(message)
+            if len(batch) == settings.FORUM_DIGEST_TASK_BATCH_SIZE:
+                yield batch
+                batch = []
+        if batch:
+            yield batch
+
+    try:
+        for batch in batch_messages():
+            generate_and_send_digests_flagged.delay(batch)
+    except (CommentsServiceException, UserServiceException) as error:
+        raise do_forums_digests_flagged.retry(exc=error)
+
 
 @celery.task(max_retries=settings.DAILY_TASK_MAX_RETRIES, default_retry_delay=settings.DAILY_TASK_RETRY_DELAY)
 def do_forums_digests():
