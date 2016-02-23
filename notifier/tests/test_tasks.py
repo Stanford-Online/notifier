@@ -4,8 +4,6 @@ from contextlib import nested
 import datetime
 import json
 from os.path import dirname, join
-import sys
-import traceback
 
 from boto.ses.exceptions import SESMaxSendingRateExceededError
 from django.conf import settings
@@ -14,21 +12,70 @@ from django.test import TestCase
 from django.test.utils import override_settings
 from mock import patch, Mock
 
+from notifier.tasks import COMMENT_THREAD_URL_FORMAT
 from notifier.tasks import generate_and_send_digests, do_forums_digests
-from notifier.pull import Parser
+from notifier.tasks import generate_and_send_digests_flagged
+from notifier.tasks import do_forums_digests_flagged
+from notifier.pull import process_cs_response, CommentsServiceException
 from notifier.user import UserServiceException, DIGEST_NOTIFICATION_PREFERENCE_KEY
+from .utils import make_user_info
 
+TEST_COURSE_ID = 'org/course/run'
+TEST_COMMENTABLE = 'test_commentable'
 
 # fixture data helper
 usern = lambda n: {
     'name': 'user%d' % n,
     'id': n,
     'email': 'user%d@dummy.edu' %n,
-    'username': 'user%d' % n,
     'preferences': {
         DIGEST_NOTIFICATION_PREFERENCE_KEY: 'pref%d' % n,
     },
+    'course_info': {
+
+    }
 }
+
+
+def make_flagged_threads():
+    """Makes test fixture response from flagged threads API."""
+    return [
+        {
+            'course_id': TEST_COURSE_ID,
+            'commentable_id': TEST_COMMENTABLE,
+            'comment_thread_id': i,
+        }
+        for i in xrange(1, 6)
+    ]
+
+
+def make_messages(count_messages=5, count_posts=10):
+    """
+    Create sample messages for testing
+
+    Args:
+        count_messages (int): number of total messages to be made
+        count_posts (int): number of posts per message
+
+    Returns:
+        messages (list): contains dicts of messages
+    """
+    return [
+        {
+            'course_id': TEST_COURSE_ID,
+            'recipient': usern(i),
+            'threads': [
+                '{base_url}/courses/{course_id}/discussion/forum/{commentable_id}/threads/{comment_thread_id}'.format(
+                    base_url=settings.LMS_URL_BASE,
+                    course_id=TEST_COURSE_ID,
+                    commentable_id=TEST_COMMENTABLE,
+                    comment_thread_id=j,
+                )
+                for j in xrange(1, count_posts + 1)
+            ],
+        }
+        for i in xrange(count_messages)
+    ]
 
 
 @override_settings(CELERY_EAGER_PROPAGATES_EXCEPTIONS=True,
@@ -67,12 +114,17 @@ class TasksTestCase(TestCase):
                     self.assertTrue(item.body in actual_text)
                     self.assertTrue(item.body in actual_html)
 
+    def _process_cs_response_with_user_info(self, data):
+        mock_user_info = make_user_info(data)
+        return process_cs_response(data, mock_user_info)
+
     def test_generate_and_send_digests(self):
         """
         """
         data = json.load(
             open(join(dirname(__file__), 'cs_notifications.result.json')))
-        user_id, digest = Parser.parse(data).next()
+
+        user_id, digest = self._process_cs_response_with_user_info(data).next()
         user = usern(10)
         with patch('notifier.tasks.generate_digest_content', return_value=[(user_id, digest)]) as p:
 
@@ -97,8 +149,10 @@ class TasksTestCase(TestCase):
         data = json.load(
             open(join(dirname(__file__), 'cs_notifications.result.json')))
 
-        with patch('notifier.tasks.generate_digest_content', return_value=Parser.parse(data)) as p:
-
+        with patch(
+            'notifier.tasks.generate_digest_content',
+            return_value=self._process_cs_response_with_user_info(data)
+        ):
             # execute task
             task_result = generate_and_send_digests.delay(
                 (usern(n) for n in xrange(2, 11)), datetime.datetime.now(), datetime.datetime.now())
@@ -112,14 +166,16 @@ class TasksTestCase(TestCase):
             for message in djmail.outbox:
                 self.assertEqual(message.to, ['rewritten-address@domain.org'])
 
-    def test_generate_and_send_digests_retry_limit(self):
+    def test_generate_and_send_digests_retry_ses(self):
         """
         """
         data = json.load(
             open(join(dirname(__file__), 'cs_notifications.result.json')))
 
-        with patch('notifier.tasks.generate_digest_content', return_value=list(Parser.parse(data))) as p:
-
+        with patch(
+            'notifier.tasks.generate_digest_content',
+            return_value=list(self._process_cs_response_with_user_info(data))
+        ):
             # setting this here because override_settings doesn't seem to
             # work on celery task configuration decorators
             expected_num_tries = 1 + settings.FORUM_DIGEST_TASK_MAX_RETRIES
@@ -129,7 +185,7 @@ class TasksTestCase(TestCase):
                 # execute task - should fail, retry twice and still fail, then
                 # give up
                 try:
-                    task_result = generate_and_send_digests.delay(
+                    generate_and_send_digests.delay(
                         [usern(n) for n in xrange(2, 11)], datetime.datetime.now(), datetime.datetime.now())
                 except SESMaxSendingRateExceededError as e:
                     self.assertEqual(
@@ -138,6 +194,145 @@ class TasksTestCase(TestCase):
                 else:
                     # should have raised
                     self.fail('task did not retry twice before giving up')
+
+    def test_generate_and_send_digests_retry_cs(self):
+        """
+        """
+        with patch(
+            'notifier.tasks.generate_digest_content',
+            side_effect=CommentsServiceException('timed out')
+        ) as mock_cs_call:
+            # setting this here because override_settings doesn't seem to
+            # work on celery task configuration decorators
+            expected_num_tries = 1 + settings.FORUM_DIGEST_TASK_MAX_RETRIES
+            try:
+                generate_and_send_digests.delay(
+                    [usern(n) for n in xrange(2, 11)], datetime.datetime.now(), datetime.datetime.now())
+            except CommentsServiceException as e:
+                self.assertEqual(mock_cs_call.call_count, expected_num_tries)
+            else:
+                # should have raised
+                self.fail('task did not retry twice before giving up')
+
+    def test_generate_and_send_digests_flagged(self):
+        """
+        Test that we can generate and send flagged forum digest emails.
+        """
+        messages = make_messages()
+
+        task_result = generate_and_send_digests_flagged.delay(messages)
+        self.assertTrue(task_result.successful())
+
+        self.assertTrue(hasattr(djmail, 'outbox'))
+        self.assertEqual(5, len(djmail.outbox))
+
+        for i, message in enumerate(djmail.outbox):
+            self.assertEqual([messages[i]['recipient']['email']], message.to)
+            for thread in messages[i]['threads']:
+                self.assertIn(thread, message.body)
+
+    def test_generate_and_send_digests_flagged_partial_retry(self):
+        """
+        Test that partial retries are not attempted
+        """
+        def side_effect(msgs):
+            """
+            Raise a throttling exception
+            """
+            msgs[0].extra_headers['status'] = 200
+            raise SESMaxSendingRateExceededError(400, 'Throttling')
+
+        messages = make_messages()
+        mock_backend = Mock(
+            name='mock_backend',
+            send_messages=Mock(
+                side_effect=side_effect,
+            ),
+        )
+        with patch('notifier.connection_wrapper.dj_get_connection', return_value=mock_backend):
+            # execute task - should fail, and not retry
+            try:
+                generate_and_send_digests_flagged.delay(messages)
+            except SESMaxSendingRateExceededError:
+                self.assertEqual(mock_backend.send_messages.call_count, 1)
+
+    def test_generate_and_send_digests_flagged_retry_ses(self):
+        """
+        Test that retries are attempted
+        """
+        messages = make_messages()
+
+        # setting this here because override_settings doesn't seem to
+        # work on celery task configuration decorators
+        expected_num_tries = 1 + settings.FORUM_DIGEST_TASK_MAX_RETRIES
+        mock_backend = Mock(name='mock_backend', send_messages=Mock(
+            side_effect=SESMaxSendingRateExceededError(400, 'Throttling')))
+        with patch('notifier.connection_wrapper.dj_get_connection', return_value=mock_backend):
+            # execute task - should fail, retry twice and still fail, then
+            # give up
+            try:
+                generate_and_send_digests_flagged.delay(messages)
+            except SESMaxSendingRateExceededError:
+                self.assertEqual(
+                    mock_backend.send_messages.call_count,
+                    expected_num_tries,
+                )
+
+    @override_settings(FORUM_DIGEST_TASK_BATCH_SIZE=9)
+    @patch('notifier.tasks.get_moderators', return_value=(usern(i) for i in xrange(10)))
+    @patch('notifier.tasks.generate_and_send_digests_flagged')
+    @patch('notifier.tasks.get_flagged_threads', return_value=make_flagged_threads())
+    def test_do_forums_digests_flagged(self, _get_threads, generate, get_moderators):
+        """
+        Test that we can send forum digests for flagged posts
+        """
+        last_message_batch = [
+            {
+                'course_id': TEST_COURSE_ID,
+                'recipient': usern(9),
+                'threads': [
+                    COMMENT_THREAD_URL_FORMAT.format(
+                        base_url=settings.LMS_URL_BASE,
+                        course_id=TEST_COURSE_ID,
+                        commentable_id=TEST_COMMENTABLE,
+                        comment_thread_id=i,
+                    )
+                    for i in xrange(1, 6)
+                ],
+            }
+        ]
+        task_result = do_forums_digests_flagged.delay()
+        self.assertTrue(task_result.successful())
+        get_moderators.assert_called_with(TEST_COURSE_ID)
+        self.assertEqual(generate.delay.call_count, 2)
+        generate.delay.assert_called_with(last_message_batch)
+
+    @override_settings(FORUM_DIGEST_TASK_BATCH_SIZE=10)
+    @patch('notifier.tasks.get_moderators', side_effect=UserServiceException("could not connect!"))
+    @patch('notifier.tasks.generate_and_send_digests_flagged')
+    @patch('notifier.tasks.get_flagged_threads', return_value=make_flagged_threads())
+    def test_do_forums_digests_flagged_user_api_unavailable(self, _get_threads, generate, get_moderators):
+        """
+        Test that retries are attempted if user API is down.
+        """
+        try:
+            do_forums_digests_flagged.delay()
+        except UserServiceException:
+            self.assertEqual(get_moderators.call_count, settings.DAILY_TASK_MAX_RETRIES + 1)
+            self.assertEqual(generate.call_count, 0)
+
+    @override_settings(FORUM_DIGEST_TASK_BATCH_SIZE=10)
+    @patch('notifier.tasks.get_flagged_threads', side_effect=CommentsServiceException('could not connect!'))
+    @patch('notifier.tasks.generate_and_send_digests_flagged')
+    def test_do_forums_digests_flagged_cs_api_unavailable(self, generate, get):
+        """
+        Test that retries are attempted if comments service API is down.
+        """
+        try:
+            do_forums_digests_flagged.delay()
+        except CommentsServiceException:
+            self.assertEqual(get.call_count, settings.DAILY_TASK_MAX_RETRIES + 1)
+            self.assertEqual(generate.call_count, 0)
 
     @override_settings(FORUM_DIGEST_TASK_BATCH_SIZE=10)
     def test_do_forums_digests(self):

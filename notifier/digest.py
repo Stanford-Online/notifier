@@ -2,8 +2,8 @@
 General formatting and rendering helpers for digest notifications.
 """
 
+from collections import Counter
 from contextlib import contextmanager
-import datetime
 import logging
 import struct
 
@@ -13,8 +13,9 @@ from django.template import Context
 from django.utils.html import strip_tags
 from django.utils.translation import ugettext as _, activate, deactivate
 from statsd import statsd
+from opaque_keys.edx.keys import CourseKey
 
-from notifier.user import UsernameCipher, LANGUAGE_PREFERENCE_KEY
+from notifier.user import DIGEST_NOTIFICATION_PREFERENCE_KEY, LANGUAGE_PREFERENCE_KEY
 
 # maximum number of threads to display per course
 MAX_COURSE_THREADS = 30
@@ -120,7 +121,8 @@ def _get_course_title(course_id):
     >>> _get_course_title("MITx/6.002x/2012_Fall")
     '6.002x MITx'
     """
-    return ' '.join(reversed(course_id.split('/')[:2]))
+    course_key = CourseKey.from_string(course_id)
+    return '{0.course} {0.org}'.format(course_key)
 
 
 def _get_course_url(course_id):
@@ -147,14 +149,14 @@ def _get_thread_url(course_id, thread_id, commentable_id):
     return _get_course_url(course_id) + thread_path
 
 
-def _get_unsubscribe_url(username):
+def _get_unsubscribe_url(user):
     """
     Formatting helper.
 
     Generate a click-through url to unsubscribe a user from digest notifications,
-    using an encrypted token based on the username.
+    using the encrypted token contained in the user's preference.
     """
-    token = UsernameCipher.encrypt(username)
+    token = user["preferences"][DIGEST_NOTIFICATION_PREFERENCE_KEY]
     return '{}/notification_prefs/unsubscribe/{}/'.format(settings.LMS_URL_BASE, token)
 
 
@@ -175,12 +177,21 @@ class Digest(object):
     def __init__(self, courses):
         self.courses = sorted(courses, key=lambda c: c.title.lower())
 
+    @property
+    def empty(self):
+        return len(self.courses) == 0
+
 class DigestCourse(object):
     def __init__(self, course_id, threads):
+        self.course_id = course_id
         self.title = _get_course_title(course_id)
         self.url = _get_course_url(course_id)
         self.thread_count = len(threads) # not the same as len(self.threads), see below
         self.threads = sorted(threads, reverse=True, key=lambda t: t.dt)[:MAX_COURSE_THREADS]
+
+    @property
+    def empty(self):
+        return len(self.threads) == 0
 
 class DigestThread(object):
     def __init__(self, thread_id, course_id, commentable_id, title, items):
@@ -227,7 +238,7 @@ def render_digest(user, digest, title, description):
         'course_names': _make_text_list([course.title for course in digest.courses]),
         'thread_count': sum(course.thread_count for course in digest.courses),
         'logo_image_url': settings.LOGO_IMAGE_URL,
-        'unsubscribe_url': _get_unsubscribe_url(user['username']),
+        'unsubscribe_url': _get_unsubscribe_url(user),
         'postal_address': settings.EMAIL_SENDER_POSTAL_ADDRESS,
         })
 
@@ -235,4 +246,35 @@ def render_digest(user, digest, title, description):
         text = get_template('digest-email.txt').render(context)
         html = get_template('digest-email.html').render(context)
 
+    return (text, html)
+
+
+@statsd.timed('notifier.render_digest_flagged.elapsed')
+def render_digest_flagged(message):
+    """
+    Generate HTML and plaintext renderings of flagged digest material, suitable for
+    emailing.
+
+    Args:
+        message (dict): with the following keys:
+            course_id (str): identifier of the course
+            recipient (dict): user info
+            threads (list): thread URLs
+
+    Returns:
+        (text_body, html_body)
+    """
+    logger.info("rendering email message: {%s}", message['recipient'])
+    threads_by_count = Counter(message['threads']).most_common()
+    context = Context({
+        'title': settings.FORUM_DIGEST_EMAIL_TITLE_FLAGGED,
+        'description': message['course_id'],
+        'thread_count': len(message['threads']),
+        'logo_image_url': settings.LOGO_IMAGE_URL,
+        'course_id': message['course_id'],
+        'threads_by_count': threads_by_count,
+    })
+    with _activate_user_lang(message['recipient']):
+        text = get_template('digest-email-flagged.txt').render(context)
+        html = get_template('digest-email-flagged.html').render(context)
     return (text, html)
