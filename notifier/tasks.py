@@ -89,7 +89,7 @@ def generate_and_send_digests_flagged(raw_msgs):
     for raw_msg in raw_msgs:
         text, html = render_digest_flagged(raw_msg)
         rendered_msg = EmailMultiAlternatives(
-            settings.FORUM_DIGEST_EMAIL_SUBJECT,
+            settings.FORUM_DIGEST_EMAIL_SUBJECT_FLAGGED,
             text,
             settings.FORUM_DIGEST_EMAIL_SENDER,
             [raw_msg['recipient']['email']],
