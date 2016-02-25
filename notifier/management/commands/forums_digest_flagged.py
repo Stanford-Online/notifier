@@ -85,6 +85,6 @@ def dry_run():
         print("To: {email_address}".format(email_address=user.get('email')))
         for user in moderators:
             print("To: {email_address}".format(email_address=user.get('email')))
-        print("Subject: {subject}".format(subject=settings.FORUM_DIGEST_EMAIL_SUBJECT))
+        print("Subject: {subject}".format(subject=settings.FORUM_DIGEST_EMAIL_SUBJECT_FLAGGED))
         print(text)
         print('==============================')
