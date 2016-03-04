@@ -23,15 +23,19 @@ INSTALLED_APPS = (
 
 SERVICE_NAME = 'notifier'
 
-# django coverage
-TEST_RUNNER = 'django_coverage.coverage_runner.CoverageRunner'
-
-
 # Misc. Notifier Formatting
 
 FORUM_DIGEST_EMAIL_SENDER = os.getenv('FORUM_DIGEST_EMAIL_SENDER', 'notifications@example.org')
 FORUM_DIGEST_EMAIL_SUBJECT = os.getenv('FORUM_DIGEST_EMAIL_SUBJECT', 'Daily Discussion Digest')
+FORUM_DIGEST_EMAIL_SUBJECT_FLAGGED = os.getenv(
+    'FORUM_DIGEST_EMAIL_SUBJECT_FLAGGED',
+    'Daily Flagged Posts Digest'
+)
 FORUM_DIGEST_EMAIL_TITLE = os.getenv('FORUM_DIGEST_EMAIL_TITLE', 'Discussion Digest')
+FORUM_DIGEST_EMAIL_TITLE_FLAGGED = os.getenv(
+    'FORUM_DIGEST_EMAIL_TITLE_FLAGGED',
+    'Flagged Posts Digest'
+)
 FORUM_DIGEST_EMAIL_DESCRIPTION = os.getenv(
     'FORUM_DIGEST_EMAIL_DESCRIPTION',
     'A digest of unread content from course discussions you are following.'
@@ -63,18 +67,15 @@ EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS')
 # email settings independent of backend
 EMAIL_REWRITE_RECIPIENT = os.getenv('EMAIL_REWRITE_RECIPIENT')
 
-# secret key for generating unsub tokens
-# this MUST be changed in production envs, and MUST match the LMS' secret key
-SECRET_KEY = os.getenv('SECRET_KEY', '85920908f28904ed733fe576320db18cabd7b6cd')
-
 # LMS links, images, etc
 LMS_URL_BASE = os.getenv('LMS_URL_BASE', 'http://localhost:8000')
 
-# Comments Service Endpoint, for digest pulls
+# Comments Service Endpoint, for digest pulls and flagged thread pulls
 CS_URL_BASE = os.getenv('CS_URL_BASE', 'http://localhost:4567')
 CS_API_KEY = os.getenv('CS_API_KEY', 'PUT_YOUR_API_KEY_HERE')
+CS_RESULT_PAGE_SIZE = 10
 
-# User Service Endpoint, for notification prefs
+# User Service Endpoint, provides subscriber lists and notification-related user data
 US_URL_BASE = os.getenv('US_URL_BASE', 'http://localhost:8000')
 US_API_KEY = os.getenv('US_API_KEY', 'PUT_YOUR_API_KEY_HERE')
 US_HTTP_AUTH_USER = os.getenv('US_HTTP_AUTH_USER', '')
@@ -93,8 +94,8 @@ import djcelery
 djcelery.setup_loader()
 BROKER_URL = os.getenv('BROKER_URL', 'django://')
 
-# limit the frequency with which the forum digest task may run.
-FORUM_DIGEST_TASK_RATE_LIMIT = "6/m" # no more than every 10 seconds
+# limit the frequency at which the forum digest celery task may be run.
+FORUM_DIGEST_TASK_RATE_LIMIT = os.getenv('FORUM_DIGEST_TASK_RATE_LIMIT', '6/m')
 # limit the size of user batches (cs service pulls / emails sent) per-task 
 FORUM_DIGEST_TASK_BATCH_SIZE = int(os.getenv('FORUM_DIGEST_TASK_BATCH_SIZE', 5))
 # limit the number of times an individual task will be retried
@@ -103,6 +104,7 @@ FORUM_DIGEST_TASK_MAX_RETRIES = 2
 FORUM_DIGEST_TASK_RETRY_DELAY = 300
 # set the interval (in minutes) at which the top-level digest task is triggered
 FORUM_DIGEST_TASK_INTERVAL = int(os.getenv('FORUM_DIGEST_TASK_INTERVAL', 1440))
+FORUM_DIGEST_TASK_INTERVAL_FLAGGED = int(os.getenv('FORUM_DIGEST_TASK_INTERVAL_FLAGGED', 0))
 
 
 LOGGING = {
@@ -166,7 +168,8 @@ if LOG_FILE:
     })
     LOGGING['loggers']['']['handlers'].append('file')
 
-CELERY_TIMEZONE = 'UTC'
+TIME_ZONE = 'UTC'  # what task workers see
+CELERY_TIMEZONE = 'UTC'  # what the main celery process sees 
 
 # set up schedule for forum digest job
 if FORUM_DIGEST_TASK_INTERVAL==1440:
@@ -175,6 +178,16 @@ if FORUM_DIGEST_TASK_INTERVAL==1440:
     DIGEST_CRON_SCHEDULE = {'hour': 0}
 else:
     DIGEST_CRON_SCHEDULE = {'minute': '*/{}'.format(FORUM_DIGEST_TASK_INTERVAL) }
+
+# set up schedule for flagged forum digest job
+if FORUM_DIGEST_TASK_INTERVAL_FLAGGED == 1440:
+    # in the production case, make the 24 hour cycle happen at a
+    # predetermined time of day (midnight UTC)
+    DIGEST_CRON_SCHEDULE_FLAGGED = {'hour': 0}
+else:
+    DIGEST_CRON_SCHEDULE_FLAGGED = {
+        'minute': '*/{}'.format(FORUM_DIGEST_TASK_INTERVAL_FLAGGED),
+    }
 
 DAILY_TASK_MAX_RETRIES = 2
 DAILY_TASK_RETRY_DELAY = 60
@@ -195,10 +208,17 @@ CELERYD_PREFETCH_MULTIPLIER = 1
 LANGUAGE_CODE = os.getenv('NOTIFIER_LANGUAGE', 'en')
 LANGUAGES = (
     ("en", "English"),
+    ("ar", "Arabic"),
+    ("es_419", "Spanish (Latin America)"),
     ("fr", "French"),
+    ("he", "Hebrew"),
+    ("hi", "Hindi"),
+    ("pt_BR", "Portuguese (Brazil)"),
+    ("ru", "Russian"),
+    ("zh_CN", "Chinese (Simplified)"),
 )
 USE_L10N = True
 LOCALE_PATHS = (os.path.join(os.path.dirname(os.path.dirname(__file__)), 'locale'),)
 
 # Parameterize digest logo image url
-LOGO_IMAGE_URL = os.getenv('LOGO_IMAGE_URL', "{}/static/images/header-logo.png".format(LMS_URL_BASE))
+LOGO_IMAGE_URL = os.getenv('LOGO_IMAGE_URL', "{}/static/images/edx-theme/edx-header-logo.png".format(LMS_URL_BASE))
