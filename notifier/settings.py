@@ -110,6 +110,8 @@ FORUM_DIGEST_TASK_RETRY_DELAY = 300
 # set the interval (in minutes) at which the top-level digest task is triggered
 FORUM_DIGEST_TASK_INTERVAL = int(os.getenv('FORUM_DIGEST_TASK_INTERVAL', 1440))
 FORUM_DIGEST_TASK_INTERVAL_FLAGGED = int(os.getenv('FORUM_DIGEST_TASK_INTERVAL_FLAGGED', 0))
+# number of days to keep forum digest task entries in the database before they are deleted
+FORUM_DIGEST_TASK_GC_DAYS = int(os.getenv('FORUM_DIGEST_TASK_GC_DAYS', 30))
 
 
 LOGGING = {
