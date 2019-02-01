@@ -5,12 +5,17 @@ import platform
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3', # Add 'postgresql_psycopg2', 'mysql', 'sqlite3' or 'oracle'.
-        'NAME':  os.path.join(os.getenv('NOTIFIER_DB_DIR', '.'), 'notifier.db'),
-        'USER': '',                      # Not used with sqlite3.
-        'PASSWORD': '',                  # Not used with sqlite3.
-        'HOST': '',                      # Set to empty string for localhost. Not used with sqlite3.
-        'PORT': '',                      # Set to empty string for default. Not used with sqlite3.
+        # Database backend defaults to 'sqlite3', but 'mysql' is also supported.
+        'ENGINE': os.getenv('NOTIFIER_DATABASE_ENGINE', 'django.db.backends.sqlite3'),
+        # Name should be set to database file path when using sqlite, and database name when using mysql.
+        'NAME': os.getenv('NOTIFIER_DATABASE_NAME', os.path.join(os.getenv('NOTIFIER_DB_DIR', '.'), 'notifier.db')),
+        # User and password are not used by sqlite, but you will have to set them when using mysql.
+        'USER': os.getenv('NOTIFIER_DATABASE_USER', ''),
+        'PASSWORD': os.getenv('NOTIFIER_DATABASE_PASSWORD', ''),
+        # Host is not used by sqlite. Empty string means localhost when using mysql.
+        'HOST': os.getenv('NOTIFIER_DATABASE_HOST', ''),
+        # Port is not used by sqlite. Empty string means default port when using mysql.
+        'PORT': os.getenv('NOTIFIER_DATABASE_PORT', ''),
     }
 }
 
@@ -80,7 +85,7 @@ US_URL_BASE = os.getenv('US_URL_BASE', 'http://localhost:8000')
 US_API_KEY = os.getenv('US_API_KEY', 'PUT_YOUR_API_KEY_HERE')
 US_HTTP_AUTH_USER = os.getenv('US_HTTP_AUTH_USER', '')
 US_HTTP_AUTH_PASS = os.getenv('US_HTTP_AUTH_PASS', '')
-US_RESULT_PAGE_SIZE = 10
+US_RESULT_PAGE_SIZE = int(os.getenv('US_RESULT_PAGE_SIZE', 10))
 
 # Logging
 LOG_FILE = os.getenv('LOG_FILE')
@@ -105,6 +110,8 @@ FORUM_DIGEST_TASK_RETRY_DELAY = 300
 # set the interval (in minutes) at which the top-level digest task is triggered
 FORUM_DIGEST_TASK_INTERVAL = int(os.getenv('FORUM_DIGEST_TASK_INTERVAL', 1440))
 FORUM_DIGEST_TASK_INTERVAL_FLAGGED = int(os.getenv('FORUM_DIGEST_TASK_INTERVAL_FLAGGED', 0))
+# number of days to keep forum digest task entries in the database before they are deleted
+FORUM_DIGEST_TASK_GC_DAYS = int(os.getenv('FORUM_DIGEST_TASK_GC_DAYS', 30))
 
 
 LOGGING = {
@@ -209,16 +216,18 @@ LANGUAGE_CODE = os.getenv('NOTIFIER_LANGUAGE', 'en')
 LANGUAGES = (
     ("en", "English"),
     ("ar", "Arabic"),
-    ("es_419", "Spanish (Latin America)"),
+    ("es-419", "Spanish (Latin America)"),
     ("fr", "French"),
     ("he", "Hebrew"),
     ("hi", "Hindi"),
-    ("pt_BR", "Portuguese (Brazil)"),
+    ("pt-br", "Portuguese (Brazil)"),
     ("ru", "Russian"),
-    ("zh_CN", "Chinese (Simplified)"),
+    ("zh-cn", "Chinese (China)"),
 )
 USE_L10N = True
 LOCALE_PATHS = (os.path.join(os.path.dirname(os.path.dirname(__file__)), 'locale'),)
 
 # Parameterize digest logo image url
-LOGO_IMAGE_URL = os.getenv('LOGO_IMAGE_URL', "{}/static/images/edx-theme/edx-header-logo.png".format(LMS_URL_BASE))
+LOGO_IMAGE_URL = os.getenv('LOGO_IMAGE_URL', "{}/static/images/edx-theme/edx-logo-77x36.png".format(LMS_URL_BASE))
+
+DEAD_MANS_SNITCH_URL = os.getenv('DEAD_MANS_SNITCH_URL', '')
