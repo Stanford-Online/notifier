@@ -9,10 +9,10 @@ coverage:
 	coverage run manage.py test notifier
 	coverage report
 
-quality: pep8 pylint
+quality: pycodestyle pylint
 
-pep8:
-	diff-quality --violations pep8 --compare-branch $(COMPARE_BRANCH)
+pycodestyle:
+	diff-quality --violations pycodestyle --compare-branch $(COMPARE_BRANCH)
 
 pylint:
 	diff-quality --violations pylint --compare-branch $(COMPARE_BRANCH)
