@@ -5,6 +5,6 @@ install:
   - pip install -r requirements.txt
   - pip install coveralls
 script:
-  - make test
+  - sudo rm -f /etc/boto.cfg && make test
 after_success:
   - coveralls

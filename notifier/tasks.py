@@ -34,8 +34,11 @@ COMMENT_THREAD_URL_FORMAT = '/'.join([
     "{comment_thread_id}",
 ])
 
+DEFAULT_LANGUAGE = 'en'
+
+
 @celery.task(rate_limit=settings.FORUM_DIGEST_TASK_RATE_LIMIT, max_retries=settings.FORUM_DIGEST_TASK_MAX_RETRIES)
-def generate_and_send_digests(users, from_dt, to_dt):
+def generate_and_send_digests(users, from_dt, to_dt, language=None):
     """
     This task generates and sends forum digest emails to multiple users in a
     single background operation.
@@ -46,6 +49,7 @@ def generate_and_send_digests(users, from_dt, to_dt):
     `from_dt` and `to_dt` are datetime objects representing the start and end
     of the time window for which to generate a digest.
     """
+    settings.LANGUAGE_CODE = language or settings.LANGUAGE_CODE or DEFAULT_LANGUAGE
     users_by_id = dict((str(u['id']), u) for u in users)
     msgs = []
     try:
@@ -274,6 +278,6 @@ def do_forums_digests(self):
 
     try:
         for user_batch in batch_digest_subscribers():
-            generate_and_send_digests.delay(user_batch, from_dt, to_dt)
+            generate_and_send_digests.delay(user_batch, from_dt, to_dt, language=settings.LANGUAGE_CODE)
     except UserServiceException, e:
         raise do_forums_digests.retry(exc=e)

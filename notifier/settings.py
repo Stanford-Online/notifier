@@ -212,6 +212,10 @@ BROKER_HEARTBEAT_CHECKRATE = 2
 # Each worker should only fetch one message at a time
 CELERYD_PREFETCH_MULTIPLIER = 1
 
+# Maximum number of tasks a pool worker process can execute
+# before it's replaced with a new one.
+CELERYD_MAX_TASKS_PER_CHILD = int(os.getenv('CELERYD_MAX_TASKS_PER_CHILD', 100))
+
 LANGUAGE_CODE = os.getenv('NOTIFIER_LANGUAGE', 'en')
 LANGUAGES = (
     ("en", "English"),
@@ -231,3 +235,5 @@ LOCALE_PATHS = (os.path.join(os.path.dirname(os.path.dirname(__file__)), 'locale
 LOGO_IMAGE_URL = os.getenv('LOGO_IMAGE_URL', "{}/static/images/edx-theme/edx-logo-77x36.png".format(LMS_URL_BASE))
 
 DEAD_MANS_SNITCH_URL = os.getenv('DEAD_MANS_SNITCH_URL', '')
+
+SECRET_KEY = os.getenv('SECRET_KEY', 'secret_key')
